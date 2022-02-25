@@ -2,9 +2,11 @@
 /* eslint-disable react/prop-types */
 import React, { useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import { TerminalContextProvider } from 'react-terminal';
 import { selectCurrentActivity } from '../store/features/activities/slice';
 import { navigateToActivity } from '../store/features/groups/actions/deck';
 import Adaptivity from './preview-tools/Adaptivity';
+import Console from './preview-tools/Console';
 import Inspector from './preview-tools/Inspector';
 import ScreenSelector from './preview-tools/ScreenSelector';
 
@@ -130,56 +132,68 @@ const PreviewTools: React.FC<PreviewToolsProps> = ({ model }) => {
   };
 
   return (
-    <div id="PreviewTools" className={`preview-tools${opened ? ' opened' : ''}`}>
-      {opened && (
-        <Title togglePanel={togglePanel} title={view.charAt(0).toUpperCase() + view.slice(1)} />
-      )}
+    <TerminalContextProvider>
+      <div id="PreviewTools" className={`preview-tools${opened ? ' opened' : ''}`}>
+        {opened && (
+          <Title togglePanel={togglePanel} title={view.charAt(0).toUpperCase() + view.slice(1)} />
+        )}
 
-      <div className="pt-body">
-        {!opened && (
-          <div className="action-picker">
-            <button
-              onClick={() => displayView('screens')}
-              className="mb-2"
-              style={{
-                border: 'none',
-                background: 'transparent',
-              }}
-            >
-              <ScreensIcon />
-            </button>
-            <button
-              onClick={() => displayView('adaptivity')}
-              className="mb-2"
-              style={{
-                border: 'none',
-                background: 'transparent',
-              }}
-            >
-              <AdaptivityIcon />
-            </button>
-            <button
-              onClick={() => displayView('inspector')}
-              style={{
-                border: 'none',
-                background: 'transparent',
-              }}
-            >
-              <InspectorIcon />
-            </button>
-          </div>
-        )}
-        {opened && view === 'screens' && (
-          <ScreenSelector
-            sequence={sequence}
-            navigate={navigate}
-            currentActivity={currentActivity}
-          />
-        )}
-        {opened && view === 'adaptivity' && <Adaptivity currentActivity={currentActivity} />}
-        {opened && view === 'inspector' && <Inspector currentActivity={currentActivity} />}
+        <div className="pt-body">
+          {!opened && (
+            <div className="action-picker">
+              <button
+                onClick={() => displayView('screens')}
+                className="mb-2"
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                }}
+              >
+                <ScreensIcon />
+              </button>
+              <button
+                onClick={() => displayView('adaptivity')}
+                className="mb-2"
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                }}
+              >
+                <AdaptivityIcon />
+              </button>
+              <button
+                onClick={() => displayView('inspector')}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                }}
+              >
+                <InspectorIcon />
+              </button>
+              <button
+                onClick={() => displayView('console')}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                }}
+              >
+                <InspectorIcon />
+              </button>
+            </div>
+          )}
+          {opened && view === 'screens' && (
+            <ScreenSelector
+              sequence={sequence}
+              navigate={navigate}
+              currentActivity={currentActivity}
+            />
+          )}
+          {opened && view === 'adaptivity' && <Adaptivity currentActivity={currentActivity} />}
+          {opened && view === 'inspector' && <Inspector currentActivity={currentActivity} />}
+          {opened && view === 'console' && <Console currentActivity={currentActivity} />}
+        </div>
       </div>
-    </div>
+    </TerminalContextProvider>
   );
 };
 

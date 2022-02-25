@@ -8125,6 +8125,13 @@ react-color@^2.19.3:
     reactcss "^1.2.0"
     tinycolor2 "^1.4.1"
 
+react-device-detect@^1.17.0:
+  version "1.17.0"
+  resolved "https://registry.yarnpkg.com/react-device-detect/-/react-device-detect-1.17.0.tgz#a00b4fd6880cebfab3fd8a42a79dc0290cdddca9"
+  integrity sha512-bBblIStwpHmoS281JFIVqeimcN3LhpoP5YKDWzxQdBIUP8S2xPvHDgizLDhUq2ScguLfVPmwfF5y268EEQR60w==
+  dependencies:
+    ua-parser-js "^0.7.24"
+
 react-dnd-html5-backend@^14.0:
   version "14.1.0"
   resolved "https://registry.yarnpkg.com/react-dnd-html5-backend/-/react-dnd-html5-backend-14.1.0.tgz#b35a3a0c16dd3a2bfb5eb7ec62cf0c2cace8b62f"
@@ -8297,6 +8304,14 @@ react-select2-wrapper@^1.0.4-beta6:
     prop-types "^15.5.8"
     select2 "^4.0.0"
     shallow-equal-fuzzy "^0.0.2"
+
+react-terminal@^1.2.1:
+  version "1.2.1"
+  resolved "https://registry.yarnpkg.com/react-terminal/-/react-terminal-1.2.1.tgz#e5b87cfda69b8f56d6b46a597dd6b923e3dd4a77"
+  integrity sha512-JRCSgpQby723zLvyBRqHWKDmX+0+r7fQWYOAZBGHcXR+We1IMHdObyx5ygufY2LBWLtljyrAHRD0FPPWrdb7wA==
+  dependencies:
+    prop-types "^15.7.2"
+    react-device-detect "^1.17.0"
 
 react-tiny-popover@^7.0.1:
   version "7.0.1"
@@ -9624,6 +9639,11 @@ typescript@^4.4.4:
   version "4.5.5"
   resolved "https://registry.yarnpkg.com/typescript/-/typescript-4.5.5.tgz#d8c953832d28924a9e3d37c73d729c846c5896f3"
   integrity sha512-TCTIul70LyWe6IJWT8QSYeA54WQe8EjQFU4wY52Fasj5UKx88LNYKCgBEHcOMOrFF1rKGbD8v/xcNWVUq9SymA==
+
+ua-parser-js@^0.7.24:
+  version "0.7.31"
+  resolved "https://registry.yarnpkg.com/ua-parser-js/-/ua-parser-js-0.7.31.tgz#649a656b191dffab4f21d5e053e27ca17cbff5c6"
+  integrity sha512-qLK/Xe9E2uzmYI3qLeOmI0tEOt+TBBQyUIAh4aAgU05FVYzeZrKUdkAZfBNVGRaHVgV0TDkdEngJSw/SyQchkQ==
 
 unbox-primitive@^1.0.1:
   version "1.0.1"
