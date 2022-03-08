@@ -19,6 +19,7 @@ import { MediaItemRequest, ScoringStrategy } from 'components/activities/types';
 import { lastPart } from 'components/activities/oli_embedded/utils';
 import { XmlEditor } from 'components/common/XmlEditor';
 import ModalSelection from 'components/modal/ModalSelection';
+import format from 'xml-formatter';
 const store = configureStore();
 
 const Embedded = (props: AuthoringElementProps<OliEmbeddedModelSchema>) => {
@@ -147,7 +148,7 @@ const Embedded = (props: AuthoringElementProps<OliEmbeddedModelSchema>) => {
   return (
     <>
       <XmlEditor
-        value={model.modelXml}
+        value={format(model.modelXml)}
         disabled={false}
         onChange={(newValue: string) => dispatch(OliEmbeddedActions.editActivityXml(newValue))}
       />
