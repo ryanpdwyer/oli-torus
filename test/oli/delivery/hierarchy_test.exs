@@ -27,6 +27,10 @@ defmodule Oli.Delivery.HierarchyTest do
       |> Map.put(:nested_page_two_node, nested_page_two_node)
     end
 
+    test "create_hierarchy/1", %{container: %{revision: root_revision}, pub1: pub1} do
+      IO.inspect(Hierarchy.create_hierarchy(root_revision, pub1.id))
+    end
+
     test "build_navigation_link_map/1", %{
       hierarchy: hierarchy,
       page_one_node: node1,
@@ -122,7 +126,8 @@ defmodule Oli.Delivery.HierarchyTest do
     } do
       assert Hierarchy.find_in_hierarchy(hierarchy, nested_page_one_node.uuid) != nil
 
-      hierarchy = Hierarchy.find_and_remove_node(hierarchy, nested_page_one_node.uuid)
+      hierarchy =
+        Hierarchy.find_and_remove_node(hierarchy, nested_page_one_node.uuid)
         |> Hierarchy.finalize()
 
       assert Hierarchy.find_in_hierarchy(hierarchy, nested_page_one_node.uuid) == nil
@@ -131,7 +136,8 @@ defmodule Oli.Delivery.HierarchyTest do
     test "move_node/3", %{hierarchy: hierarchy, nested_page_one_node: nested_page_one_node} do
       node = Hierarchy.find_in_hierarchy(hierarchy, nested_page_one_node.uuid)
 
-      hierarchy = Hierarchy.move_node(hierarchy, node, hierarchy.uuid)
+      hierarchy =
+        Hierarchy.move_node(hierarchy, node, hierarchy.uuid)
         |> Hierarchy.finalize()
 
       assert Hierarchy.find_in_hierarchy(hierarchy, nested_page_one_node.uuid) != nil
@@ -195,7 +201,8 @@ defmodule Oli.Delivery.HierarchyTest do
         | children: [page_one_node | unit_node.children]
       }
 
-      hierarchy = Hierarchy.find_and_update_node(hierarchy, unit_node_with_duplicate_page_one)
+      hierarchy =
+        Hierarchy.find_and_update_node(hierarchy, unit_node_with_duplicate_page_one)
         |> Hierarchy.finalize()
 
       assert hierarchy.children
@@ -215,7 +222,8 @@ defmodule Oli.Delivery.HierarchyTest do
              |> Enum.at(1)
              |> Map.get(:resource_id) == nested_page1.id
 
-      hierarchy = Hierarchy.purge_duplicate_resources(hierarchy)
+      hierarchy =
+        Hierarchy.purge_duplicate_resources(hierarchy)
         |> Hierarchy.finalize()
 
       assert hierarchy.children

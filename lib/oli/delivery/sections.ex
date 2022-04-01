@@ -683,7 +683,7 @@ defmodule Oli.Delivery.Sections do
         } = publication
       ) do
     Repo.transaction(fn ->
-      published_resources_by_resource_id = published_resources_map(publication.id)
+      published_resources_by_resource_id = Publishing.published_resources_map(publication.id)
 
       numbering_tracker = Numbering.init_numbering_tracker()
       level = 0
@@ -916,7 +916,7 @@ defmodule Oli.Delivery.Sections do
   %{1 => %Publication{project_id: 1, ...}, ...}
   """
   def rebuild_section_curriculum(
-        %Section{id: section_id},
+        %Section{id: section_id, root_section_resource_id: root_section_resource_id} = section,
         %HierarchyNode{} = hierarchy,
         project_publications
       ) do
@@ -931,7 +931,8 @@ defmodule Oli.Delivery.Sections do
 
         # ensure there are no duplicate resources so as to not violate the
         # section_resource [section_id, resource_id] database constraint
-        hierarchy = Hierarchy.purge_duplicate_resources(hierarchy)
+        hierarchy =
+          Hierarchy.purge_duplicate_resources(hierarchy)
           |> Hierarchy.finalize()
 
         # generate a new set of section resources based on the hierarchy
@@ -970,7 +971,9 @@ defmodule Oli.Delivery.Sections do
           |> Enum.filter(fn sr_id -> !Map.has_key?(processed_section_resources_by_id, sr_id) end)
 
         from(sr in SectionResource,
-          where: sr.id in ^section_resource_ids_to_delete
+          where:
+            sr.id in ^section_resource_ids_to_delete and
+              sr.id != ^root_section_resource_id
         )
         |> Repo.delete_all()
 
@@ -1022,10 +1025,14 @@ defmodule Oli.Delivery.Sections do
           skip_resource_ids: processed_resource_ids
         )
 
-        section_resources
+        Oli.Delivery.PreviousNextIndex.rebuild(section)
+
+        {:ok, section_resources}
       end)
     else
-      throw "Cannot rebuild section curriculum with a hierarchy that has unfinalized changes. See Oli.Delivery.Hierarchy.finalize/1 for details."
+      throw(
+        "Cannot rebuild section curriculum with a hierarchy that has unfinalized changes. See Oli.Delivery.Hierarchy.finalize/1 for details."
+      )
     end
   end
 
@@ -1062,16 +1069,22 @@ defmodule Oli.Delivery.Sections do
           project_publications = get_pinned_project_publications(section_id)
           rebuild_section_curriculum(section, current_hierarchy, project_publications)
 
-          {:ok}
-
         {{:major, _version}, diff} ->
           Repo.transaction(fn ->
             # changes are major, update the spp record and use the diff to take a "best guess"
             # strategy for applying structural updates to an existing section's curriculum.
-            # new items will in a container be appended to the container's children
+            #
+            # If a container's children have not diverged from the previous revision (e.g. remixed),
+            # then the children will be completely updated to match the new state of a container.
+            # If a container's children have diverged from the previous revision, then new items will
+            # simply be be appended to the container's children
             update_section_project_publication(section, project_id, publication_id)
 
-            published_resources_by_resource_id = published_resources_map(new_publication.id)
+            prev_published_resources_by_resource_id =
+              Publishing.published_resources_map(current_publication.id)
+
+            published_resources_by_resource_id =
+              Publishing.published_resources_map(new_publication.id)
 
             %PublishedResource{revision: root_revision} =
               published_resources_by_resource_id[new_publication.root_resource_id]
@@ -1079,21 +1092,13 @@ defmodule Oli.Delivery.Sections do
             new_hierarchy =
               Hierarchy.create_hierarchy(root_revision, published_resources_by_resource_id)
 
-            processed_resource_ids = %{}
-
             {updated_hierarchy, _} =
-              new_hierarchy
-              |> Hierarchy.flatten_hierarchy()
-              |> Enum.reduce(
-                {current_hierarchy, processed_resource_ids},
-                fn node, {hierarchy, processed_resource_ids} ->
-                  maybe_process_added_or_changed_node(
-                    {hierarchy, processed_resource_ids},
-                    node,
-                    diff,
-                    new_hierarchy
-                  )
-                end
+              process_structural_changes(
+                new_hierarchy,
+                current_hierarchy,
+                diff,
+                published_resources_by_resource_id,
+                prev_published_resources_by_resource_id
               )
 
             updated_hierarchy = Hierarchy.finalize(updated_hierarchy)
@@ -1107,20 +1112,6 @@ defmodule Oli.Delivery.Sections do
     Broadcaster.broadcast_update_progress(section.id, publication_id, :complete)
 
     result
-  end
-
-  @doc """
-  Returns a map of resource_id to published resource
-  """
-  def published_resources_map(publication_ids) when is_list(publication_ids) do
-    Publishing.get_published_resources_by_publication(publication_ids,
-      preload: [:resource, :revision, :publication]
-    )
-    |> Enum.reduce(%{}, fn r, m -> Map.put(m, r.resource_id, r) end)
-  end
-
-  def published_resources_map(publication_id) do
-    published_resources_map([publication_id])
   end
 
   @doc """
@@ -1141,76 +1132,122 @@ defmodule Oli.Delivery.Sections do
     end)
   end
 
-  defp maybe_process_added_or_changed_node(
-         {hierarchy, processed_resource_ids},
-         %HierarchyNode{resource_id: resource_id} = node,
+  defp process_structural_changes(
+         new_hierarchy,
+         current_hierarchy,
          diff,
-         new_hierarchy
+         published_resources_by_resource_id,
+         prev_published_resources_by_resource_id
        ) do
-    container = ResourceType.get_id_by_type("container")
+    container_type = ResourceType.get_id_by_type("container")
+    processed_resource_ids = %{}
 
-    if Map.has_key?(processed_resource_ids, resource_id) do
-      # already processed, skip and continue
-      {hierarchy, processed_resource_ids}
-    else
-      # get change type from diff and process accordingly
-      case diff[resource_id] do
-        {:added, _} ->
-          # find the current parent of the node, using the assumed to be unique resource_id (as mentioned above)
-          current_parent = hierarchy_parent_node(hierarchy, new_hierarchy, resource_id)
+    new_hierarchy
+    |> Hierarchy.flatten_hierarchy()
+    |> Enum.reduce(
+      {current_hierarchy, processed_resource_ids},
+      fn %HierarchyNode{resource_id: resource_id} = node,
+         {working_hierarchy, processed_resource_ids} ->
+        # use the diff to determine whether the resource has been added, deleted, or changed
+        case diff[resource_id] do
+          {:changed, %{revision: %Revision{resource_type_id: ^container_type}}} ->
+            process_changed_container(
+              {working_hierarchy, processed_resource_ids},
+              node,
+              diff,
+              new_hierarchy,
+              published_resources_by_resource_id,
+              prev_published_resources_by_resource_id
+            )
 
-          # handle the case where the parent doesnt exist in the hierarchy, for example
-          # if the container was removed in remix
-          case current_parent do
-            nil ->
-              {hierarchy, processed_resource_ids}
+          _ ->
+            # resource isn't a changed container, so it is already covered by its parent
+            # container's update or by the non-structural spp update
+            {working_hierarchy, processed_resource_ids}
+        end
 
-            parent ->
-              parent = %HierarchyNode{parent | children: parent.children ++ [node]}
-
-              # update the hierarchy
-              hierarchy = Hierarchy.find_and_update_node(hierarchy, parent)
-
-              # we now consider all descendants to be processed, so that we dont
-              # process them again we add them to the filter
-              processed_resource_ids = add_descendant_resource_ids(node, processed_resource_ids)
-
-              {hierarchy, processed_resource_ids}
-          end
-
-        {:changed, %{revision: %Revision{resource_type_id: ^container}}} ->
-          # container has changed, check to see if any children were deleted
-          current_parent = hierarchy_node(hierarchy, resource_id)
-
-          # handle the case where the parent doesnt exist in the hierarchy, for example
-          # if the container was removed in remix
-          case current_parent do
-            nil ->
-              {hierarchy, processed_resource_ids}
-
-            parent ->
-              Enum.reduce(
-                parent.children,
-                {hierarchy, processed_resource_ids},
-                fn child, {hierarchy, processed_resource_ids} ->
-                  # fetch the latest parent on every call, as it may have changed
-                  parent = hierarchy_node(hierarchy, resource_id)
-
-                  maybe_process_deleted_node(
-                    {hierarchy, processed_resource_ids},
-                    child,
-                    parent,
-                    diff
-                  )
-                end
-              )
-          end
-
-        _ ->
-          # page wasn't added or deleted, so it is non-structural and is covered by spp update
-          {hierarchy, Map.put(processed_resource_ids, node.resource_id, true)}
+        # maybe_process_added_or_changed_node(
+        #   {hierarchy, processed_resource_ids},
+        #   node,
+        #   diff,
+        #   new_hierarchy
+        # )
       end
+    )
+  end
+
+  defp process_changed_container(
+         {working_hierarchy, processed_resource_ids},
+         %HierarchyNode{resource_id: resource_id},
+         diff,
+         new_hierarchy,
+         published_resources_by_resource_id,
+         prev_published_resources_by_resource_id
+       ) do
+    parent = hierarchy_node(working_hierarchy, resource_id)
+    new_parent = hierarchy_node(new_hierarchy, resource_id)
+
+    # handle the case where the parent doesn't exist in the working hierarchy, for example
+    # if the container was removed from the old hierarchy in remix
+    case parent do
+      nil ->
+        {working_hierarchy, Map.put(processed_resource_ids, resource_id, true)}
+
+      parent ->
+        if container_remixed?(parent, prev_published_resources_by_resource_id) do
+          # keep the existing structure and simply append new resources to the
+          # remixed container and remove deleted resources
+          new_children_resource_ids =
+            Enum.map(new_parent.children, fn %HierarchyNode{resource_id: resource_id} ->
+              resource_id
+            end)
+
+          updated_children =
+            parent.children
+            |> Enum.reduce(
+              {working_hierarchy, processed_resource_ids},
+              fn child, {working_hierarchy, processed_resource_ids} ->
+                # fetch the latest parent on every call, as it may have changed
+                parent = hierarchy_node(working_hierarchy, resource_id)
+
+                maybe_process_deleted_node(
+                  {working_hierarchy, processed_resource_ids},
+                  child,
+                  parent,
+                  diff
+                )
+              end
+            )
+
+          updated_parent = %HierarchyNode{parent | children: updated_children}
+
+          {Hierarchy.find_and_update_node(working_hierarchy, updated_parent),
+           processed_resource_ids}
+        else
+          # completely update the container by adding and removing children in the order
+          # specified by the new hierarchy
+          updated_parent = %HierarchyNode{parent | children: new_parent.children}
+
+          {Hierarchy.find_and_update_node(working_hierarchy, updated_parent),
+           processed_resource_ids}
+        end
     end
+  end
+
+  defp container_remixed?(container_node, prev_published_resources_by_resource_id) do
+    prev_container_revision = prev_published_resources_by_resource_id[container_node.resource_id]
+
+    current_children_resource_ids =
+      Enum.map(container_node.children, fn %HierarchyNode{resource_id: resource_id} ->
+        resource_id
+      end)
+
+    children_resource_ids_equal?(prev_container_revision.children, current_children_resource_ids)
+  end
+
+  defp children_resource_ids_equal?(c1, c2) do
+    Enum.zip(c1, c2)
+    |> Enum.all?(fn {r1, r2} -> r1 === r2 end)
   end
 
   defp maybe_process_deleted_node(
@@ -1233,7 +1270,7 @@ defmodule Oli.Delivery.Sections do
         # update the hierarchy
         hierarchy = Hierarchy.find_and_update_node(hierarchy, parent)
 
-        # we now consider all descendants to be processed, so that we dont process them again
+        # we now consider all descendants to be processed, so that we don't process them again
         processed_resource_ids = add_descendant_resource_ids(node, processed_resource_ids)
 
         {hierarchy, processed_resource_ids}
@@ -1354,7 +1391,7 @@ defmodule Oli.Delivery.Sections do
   defp create_nonstructural_section_resources(section_id, publication_ids,
          skip_resource_ids: skip_resource_ids
        ) do
-    published_resources_by_resource_id = published_resources_map(publication_ids)
+    published_resources_by_resource_id = Publishing.published_resources_map(publication_ids)
 
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 

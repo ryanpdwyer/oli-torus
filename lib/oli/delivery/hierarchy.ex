@@ -12,6 +12,7 @@ defmodule Oli.Delivery.Hierarchy do
 
   alias Oli.Delivery.Hierarchy.HierarchyNode
   alias Oli.Resources.Numbering
+  alias Oli.Publishing
   alias Oli.Publishing.PublishedResource
   alias Oli.Resources.ResourceType
 
@@ -76,19 +77,36 @@ defmodule Oli.Delivery.Hierarchy do
 
   @doc """
   Constructs an in-memory hierarchy from a given root revision using the provided
-  published_resources_by_resource_id map
+  published_resources_by_resource_id map.any()
+
+  This function is intended to create a "clean" hierarchy directly from a published
+  root revision and therefore will not include any remix modifications or section
+  resource related information. To create a hierarchy from an already existing section
+  use DeliveryResolver.full_hierarchy(section.slug) instead.
+
+  This function also returns a revision_tree_digest that includes all children revision ids in the
+  hierarchy as as string, e.g. "1{2{},3{},4{5{},6{}}}". This can be used to compute the hash for
+  the higher level HierarchyNode when this function is used recursively. This hash can then be used to
+  quickly compare the exact hierarchy of revisions, for example when calculating a structural diff.
   """
-  def create_hierarchy(revision, published_resources_by_resource_id) do
+  def create_hierarchy(root_revision, publication_id) when is_integer(publication_id) do
+    published_resources_by_resource_id = Publishing.published_resources_map(publication_id)
+
+    create_hierarchy(root_revision, published_resources_by_resource_id)
+  end
+
+  def create_hierarchy(root_revision, published_resources_by_resource_id)
+      when is_map(published_resources_by_resource_id) do
     numbering_tracker = Numbering.init_numbering_tracker()
     level = 0
 
-    create_hierarchy(revision, published_resources_by_resource_id, level, numbering_tracker)
+    create_hierarchy(root_revision, published_resources_by_resource_id, level, numbering_tracker)
   end
 
   defp create_hierarchy(revision, published_resources_by_resource_id, level, numbering_tracker) do
     {index, numbering_tracker} = Numbering.next_index(numbering_tracker, level, revision)
 
-    children =
+    {children, child_digests} =
       Enum.map(revision.children, fn child_id ->
         %PublishedResource{revision: child_revision} =
           published_resources_by_resource_id[child_id]
@@ -100,21 +118,25 @@ defmodule Oli.Delivery.Hierarchy do
           numbering_tracker
         )
       end)
+      |> Enum.unzip()
 
     %PublishedResource{publication: pub} =
       published_resources_by_resource_id[revision.resource_id]
 
-    %HierarchyNode{
-      uuid: uuid(),
-      numbering: %Numbering{
-        index: index,
-        level: level
-      },
-      revision: revision,
-      resource_id: revision.resource_id,
-      project_id: pub.project_id,
-      children: children
-    }
+    revision_tree_digest = "#{revision.id}{#{Enum.join(child_digests, ",")}}"
+
+    {%HierarchyNode{
+       uuid: uuid(),
+       hash: :crypto.hash(:md5, revision_tree_digest) |> Base.encode16(),
+       numbering: %Numbering{
+         index: index,
+         level: level
+       },
+       revision: revision,
+       resource_id: revision.resource_id,
+       project_id: pub.project_id,
+       children: children
+     }, revision_tree_digest}
   end
 
   @doc """
@@ -129,9 +151,9 @@ defmodule Oli.Delivery.Hierarchy do
   end
 
   defp purge_duplicate_resources(
-        %HierarchyNode{resource_id: resource_id, children: children} = node,
-        processed_nodes
-      ) do
+         %HierarchyNode{resource_id: resource_id, children: children} = node,
+         processed_nodes
+       ) do
     processed_nodes = Map.put_new(processed_nodes, resource_id, node)
 
     {children, processed_nodes} =
@@ -195,7 +217,9 @@ defmodule Oli.Delivery.Hierarchy do
       end
 
     children =
-      Enum.filter(container_node.children, fn %HierarchyNode{revision: r} -> r.id !== source_node.revision.id end)
+      Enum.filter(container_node.children, fn %HierarchyNode{revision: r} ->
+        r.id !== source_node.revision.id
+      end)
       |> List.insert_at(insert_index, source_node)
 
     %HierarchyNode{container_node | children: children}

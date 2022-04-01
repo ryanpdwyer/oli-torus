@@ -323,7 +323,6 @@ defmodule OliWeb.Delivery.RemixSection do
     } = socket.assigns
 
     Sections.rebuild_section_curriculum(section, hierarchy, pinned_project_publications)
-    Oli.Delivery.PreviousNextIndex.rebuild(section)
 
     {:noreply, redirect(socket, to: redirect_after_save)}
   end

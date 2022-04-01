@@ -1089,7 +1089,7 @@ defmodule Oli.Seeder do
     set_container_children(children, container, container_revision, publication)
   end
 
-  defp set_container_children(children, container, container_revision, publication) do
+  def set_container_children(children, container, container_revision, publication) do
     {:ok, updated} =
       Oli.Resources.create_revision_from_previous(container_revision, %{children: children})
 

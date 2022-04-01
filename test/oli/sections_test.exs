@@ -816,6 +816,259 @@ defmodule Oli.SectionsTest do
       assert section_resources
              |> Enum.find(fn sr -> sr.resource_id == Map.get(map, :o1).resource.id end)
     end
+
+    test "apply_publication_update/2 handles a previously remixed section correctly", %{
+      author: author,
+      project: project,
+      container: %{resource: container_resource, revision: container_revision},
+      page1: page1,
+      revision1: revision1,
+      page2: page2,
+      revision2: revision2,
+      institution: institution
+    } = map do
+      # applying a publication update should only replace container children if container
+      # has not been previously remixed and only append new items when a container has been remixed
+
+      working_pub = Publishing.project_working_publication(project.slug)
+
+      # add 2 units each with 2 pages, one will be remixed and the other will remain the same
+      %{resource: u1_new_page1, revision: _revision} =
+        Seeder.create_page("U1 New page one", working_pub, project, author)
+
+      %{resource: u1_new_page2, revision: _revision} =
+        Seeder.create_page("U1 New page two", working_pub, project, author)
+
+      %{resource: unit1_resource, revision: unit1_revision} =
+        Seeder.create_container("Unit one", working_pub, project, author)
+
+      %{resource: u2_new_page3, revision: _revision} =
+        Seeder.create_page("U2 New page three", working_pub, project, author)
+
+      %{resource: u2_new_page4, revision: _revision} =
+        Seeder.create_page("U2 New page four", working_pub, project, author)
+
+      %{resource: unit2_resource, revision: unit2_revision} =
+        Seeder.create_container("Unit two", working_pub, project, author)
+
+      unit1_revision =
+        Seeder.attach_pages_to(
+          [u1_new_page1, u1_new_page2],
+          unit1_resource,
+          unit1_revision,
+          working_pub
+        )
+
+      unit2_revision =
+        Seeder.attach_pages_to(
+          [u2_new_page3, u2_new_page4],
+          unit2_resource,
+          unit2_revision,
+          working_pub
+        )
+
+      container_revision =
+        Seeder.attach_pages_to(
+          [unit1_resource, unit2_resource],
+          container_resource,
+          container_revision,
+          working_pub
+        )
+
+      {:ok, initial_pub} = Publishing.publish_project(project, "added some units")
+
+      # Create a course section using the initial publication
+      {:ok, section} =
+        Sections.create_section(%{
+          title: "1",
+          timezone: "1",
+          registration_open: true,
+          context_id: UUID.uuid4(),
+          institution_id: institution.id,
+          base_project_id: project.id
+        })
+        |> then(fn {:ok, section} -> section end)
+        |> Sections.create_section_resources(initial_pub)
+
+      # verify the curriculum precondition
+      hierarchy = DeliveryResolver.full_hierarchy(section.slug)
+
+      Hierarchy.inspect hierarchy
+
+      assert hierarchy.children |> Enum.count() == 4
+      assert hierarchy.children |> Enum.at(0) |> Map.get(:resource_id) == page1.id
+      assert hierarchy.children |> Enum.at(1) |> Map.get(:resource_id) == page2.id
+      assert hierarchy.children |> Enum.at(2) |> Map.get(:resource_id) == unit1_resource.id
+      assert hierarchy.children |> Enum.at(3) |> Map.get(:resource_id) == unit2_resource.id
+
+      ## TODO: Get remix working here
+      # # remix unit 1, swap page 1 and page 2 positions
+      # unit_1_node = Hierarchy.find_in_hierarchy(hierarchy, fn n -> n.resource_id == unit1_resource.id end)
+      # u1_new_page1_node = Hierarchy.find_in_hierarchy(hierarchy, fn n -> n.resource_id == u1_new_page1.id end)
+
+      # hierarchy = Hierarchy.reorder_children(unit_1_node, u1_new_page1_node, 0, 1) |> Hierarchy.finalize()
+
+      # project_publications = Sections.get_pinned_project_publications(section.id)
+      # Sections.rebuild_section_curriculum(section, hierarchy, project_publications)
+
+      # add a new page to the first position in both units 1 and 2
+      working_pub = Publishing.project_working_publication(project.slug)
+
+      %{resource: u1_new_page5, revision: _revision} =
+        Seeder.create_page("U1 New page five", working_pub, project, author)
+
+      Seeder.set_container_children(
+        [u1_new_page5.id | unit1_revision.children],
+        unit1_resource,
+        unit1_revision,
+        working_pub
+      )
+
+      %{resource: u2_new_page6, revision: _revision} =
+        Seeder.create_page("U2 New page six", working_pub, project, author)
+
+      Seeder.set_container_children(
+        [u2_new_page6.id | unit2_revision.children],
+        unit2_resource,
+        unit2_revision,
+        working_pub
+      )
+
+      # publish changes
+      {:ok, latest_publication} = Publishing.publish_project(project, "more changes")
+
+      # apply the new publication update to the section
+      Sections.apply_publication_update(section, latest_publication.id)
+
+      # verify non-remixed container are updated to the latest and remixed ones simply append new items
+      hierarchy = DeliveryResolver.full_hierarchy(section.slug)
+
+      Hierarchy.inspect hierarchy
+
+      # verify new page 5 is the first page in the unit (non-remixed container is completely updated)
+      assert hierarchy.children
+             |> Enum.at(2)
+             |> Map.get(:children)
+             |> Enum.at(0)
+             |> Map.get(:resource_id) == u1_new_page5.id
+
+      # # verify new page 5 is the last page in the unit (resource is simply appended to remixed container)
+      # assert hierarchy.children
+      #        |> Enum.at(3)
+      #        |> Map.get(:children)
+      #        |> Enum.at(2)
+      #        |> Map.get(:resource_id) == u1_new_page5.id
+
+
+
+      # # publish changes
+      # {:ok, latest_publication} = Publishing.publish_project(project, "some changes")
+
+
+      # # make some structural changes to project and publish
+      # working_pub = Publishing.project_working_publication(project.slug)
+
+      # # add some pages to the root container
+      # %{resource: p1_new_page1, revision: _revision} =
+      #   Seeder.create_page("P1 New Page one", working_pub, project, author)
+
+      # %{resource: p1_new_page2, revision: _revision} =
+      #   Seeder.create_page("P1 New Page two", working_pub, project, author)
+
+      # container_revision =
+      #   Seeder.attach_pages_to(
+      #     [p1_new_page1, p1_new_page2],
+      #     container_resource,
+      #     container_revision,
+      #     working_pub
+      #   )
+
+      # # reorder
+
+      # # create a unit
+      # %{resource: unit1_resource, revision: unit1_revision} =
+      #   Seeder.create_container("Unit 1", working_pub, project, author)
+
+      # # create some nested children
+      # %{resource: nested_page1, revision: _nested_revision1} =
+      #   Seeder.create_page("Nested Page One", working_pub, project, author)
+
+      # %{resource: nested_page2, revision: _nested_revision2} =
+      #   Seeder.create_page(
+      #     "Nested Page Two",
+      #     working_pub,
+      #     project,
+      #     author,
+      #     Seeder.create_sample_content()
+      #   )
+
+      # _unit1_revision =
+      #   Seeder.attach_pages_to(
+      #     [nested_page1, nested_page2],
+      #     unit1_resource,
+      #     unit1_revision,
+      #     working_pub
+      #   )
+
+      # container_revision =
+      #   Seeder.attach_pages_to(
+      #     [unit1_resource],
+      #     container_resource,
+      #     container_revision,
+      #     working_pub
+      #   )
+
+      # # remove page 2
+      # _deleted_revision =
+      #   Seeder.delete_page(page2, revision2, container_resource, container_revision, working_pub)
+
+      # # publish changes
+      # {:ok, latest_publication} = Publishing.publish_project(project, "some changes")
+
+      # # apply the new publication update to the section
+      # Sections.apply_publication_update(section, latest_publication.id)
+
+      # # reload latest hierarchy
+      # hierarchy = DeliveryResolver.full_hierarchy(section.slug)
+
+      # # verify non-structural changes are applied as expected
+      # assert hierarchy.children |> Enum.at(0) |> then(& &1.revision.content) ==
+      #          page1_changes["content"]
+
+      # # verify the updated curriculum structure matches the expected result
+
+      # assert hierarchy.children |> Enum.count() == 4
+      # assert hierarchy.children |> Enum.at(0) |> Map.get(:resource_id) == page1.id
+      # assert hierarchy.children |> Enum.at(1) |> Map.get(:resource_id) == p1_new_page1.id
+      # assert hierarchy.children |> Enum.at(2) |> Map.get(:resource_id) == p1_new_page2.id
+      # assert hierarchy.children |> Enum.at(3) |> Map.get(:resource_id) == unit1_resource.id
+
+      # assert hierarchy.children |> Enum.at(3) |> Map.get(:children) |> Enum.count() == 2
+
+      # assert hierarchy.children
+      #        |> Enum.at(3)
+      #        |> Map.get(:children)
+      #        |> Enum.at(0)
+      #        |> Map.get(:resource_id) == nested_page1.id
+
+      # assert hierarchy.children
+      #        |> Enum.at(3)
+      #        |> Map.get(:children)
+      #        |> Enum.at(1)
+      #        |> Map.get(:resource_id) == nested_page2.id
+
+      # # verify the final number of section resource records matches what is
+      # # expected to guard against section resource record leaks
+      # section_id = section.id
+
+      # section_resources =
+      #   from(sr in SectionResource,
+      #     where: sr.section_id == ^section_id
+      #   )
+      #   |> Repo.all()
+
+      # assert section_resources |> Enum.count() == 8
+    end
   end
 
   describe "sections remix" do

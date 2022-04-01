@@ -14,6 +14,7 @@ defmodule Oli.Delivery.Hierarchy.HierarchyNode do
   """
 
   defstruct uuid: nil,
+            hash: nil,
             numbering: nil,
             children: [],
             resource_id: nil,

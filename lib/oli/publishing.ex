@@ -1091,4 +1091,19 @@ defmodule Oli.Publishing do
 
     Enum.map(results, fn [slug, title] -> %{slug: slug, title: title} end)
   end
+
+  @doc """
+  Returns a map of resource_id to published resource
+  """
+  def published_resources_map(publication_ids) when is_list(publication_ids) do
+    Publishing.get_published_resources_by_publication(publication_ids,
+      preload: [:resource, :revision, :publication]
+    )
+    |> Enum.reduce(%{}, fn r, m -> Map.put(m, r.resource_id, r) end)
+  end
+
+  def published_resources_map(publication_id) do
+    published_resources_map([publication_id])
+  end
+
 end

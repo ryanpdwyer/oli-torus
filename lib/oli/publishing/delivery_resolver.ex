@@ -151,6 +151,8 @@ defmodule Oli.Publishing.DeliveryResolver do
   def full_hierarchy(section_slug) do
     {hierarchy_nodes, root_hierarchy_node} = hierarchy_nodes_by_sr_id(section_slug)
 
+    IO.inspect {hierarchy_nodes, root_hierarchy_node}
+    
     hierarchy_node_with_children(root_hierarchy_node, hierarchy_nodes)
   end
 
