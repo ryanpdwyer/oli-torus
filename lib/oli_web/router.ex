@@ -808,6 +808,9 @@ defmodule OliWeb.Router do
 
     live_dashboard("/dashboard",
       metrics: OliWeb.Telemetry,
+      additional_pages: [
+        flame_on: FlameOn.DashboardPage
+      ],
       ecto_repos: [Oli.Repo],
       session: {__MODULE__, :with_session, []}
     )
