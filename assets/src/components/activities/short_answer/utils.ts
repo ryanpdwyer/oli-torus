@@ -13,6 +13,7 @@ export const defaultModel: () => ShortAnswerModelSchema = () => {
   return {
     stem: makeStem(''),
     inputType: 'text',
+    submitAndCompare: false,
     authoring: {
       parts: [
         {
